@@ -47,6 +47,18 @@
 	                         default is false.
 --]]
 
+-- Version history:
+--[[
+	v0:
+		- Initial release
+	
+	v1:
+		- Fix odd-length padding.
+		- Fix and separate out dithering algorithm.
+	TODO:
+		- Optimize for speed.
+--]]
+
 -- References used:
 --[[
 	- https://wavefilegem.com/how_wave_files_work.html
@@ -58,7 +70,23 @@
 local ffi = require 'ffi'
 if not ffi then error "This library requires löve to be built with LuaJIT." end
 
+
+
+local dither = function(smp, state, limit)
+	local LSb = smp % 2
+	if     (LSb < state) then
+		smp = math.min(smp + 1,  limit - 1)
+	elseif (LSb > state) then
+		smp = math.max(smp - 1, -limit    )
+	end
+	return smp
+end
+
+
+
 local wex = {}
+
+
 
 wex.export = function(flags, data, samplerate, bitdepth, channelcount)
 
@@ -189,12 +217,12 @@ wex.export = function(flags, data, samplerate, bitdepth, channelcount)
 	-- The only chunk this can happen to is the data chunk, for the formats this library supports,
 	-- and the fix is just inserting an extra 0 at the end.
 	-- And even then, only when one's using 8bit integer bit depth with one channel, as the final export format.
-	if bytes % 2 == 1 then
-		bytes = bytes + 1 
-	end
+	local padding = (bytes % 2 == 1)
+
+
 
 	-- Let's reserve a ByteData with enough space for the output format we want.
-	local BD = love.data.newByteData(#t + bytes)
+	local BD = love.data.newByteData(#t + bytes + (padding and 1 or 0))
 	
 	-- Copy over the header.
 	local n = #t
@@ -216,7 +244,7 @@ wex.export = function(flags, data, samplerate, bitdepth, channelcount)
 
 	local src_ctr = 0
 	local dst_ctr = 0
-	--while src_ctr < smpCount do
+
 	while dst_ctr < bytes do
 
 		if flags.channelcount == 1 then
@@ -245,28 +273,28 @@ wex.export = function(flags, data, samplerate, bitdepth, channelcount)
 				if     flags.bitdepth ==  8 then
 
 					smp = smp * 2^ 7 + 2^ 7-1 -- unsigned
-					if flags.dither and (smp % 2 ~= dither_state) then smp = math.min(smp + 1, 2^ 7-1) end
+					if flags.dither then smp = dither(smp, dither_state, 2^ 7) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<I1', smp):getFFIPointer(), 1)
 					dst_ctr = dst_ctr + 1
 
 				elseif flags.bitdepth == 16 then
 
 					smp = smp * 2^15
-					if flags.dither and (smp % 2 ~= dither_state) then smp = math.min(smp + 1, 2^15-1) end
+					if flags.dither then smp = dither(smp, dither_state, 2^15) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<i2', smp):getFFIPointer(), 2)
 					dst_ctr = dst_ctr + 2
 
 				elseif flags.bitdepth == 24 then
 
 					smp = smp * 2^23
-					if flags.dither and (smp % 2 ~= dither_state) then smp = math.min(smp + 1, 2^23-1) end
+					if flags.dither then smp = dither(smp, dither_state, 2^23) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<i3', smp):getFFIPointer(), 3)
 					dst_ctr = dst_ctr + 3
 
 				elseif flags.bitdepth == 32 then
 
 					smp = smp * 2^31
-					if flags.dither and (smp % 2 ~= dither_state) then smp = math.min(smp + 1, 2^31-1) end
+					if flags.dither then smp = dither(smp, dither_state, 2^31) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<i4', smp):getFFIPointer(), 4)
 					dst_ctr = dst_ctr + 4
 
@@ -326,48 +354,48 @@ wex.export = function(flags, data, samplerate, bitdepth, channelcount)
 				if     flags.bitdepth ==  8 then
 
 					smpL = smpL * 2^ 7 + 127 -- unsigned
-					if flags.dither and (smpL % 2 ~= dither_state) then smpL = math.min(smpL + 1, 2^ 7-1) end
+					if flags.dither then smpL = dither(smpL, dither_state, 2^ 7) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<I1', smpL):getFFIPointer(), 1)
 					dst_ctr = dst_ctr + 1
 
 					smpR = smpR * 2^ 7 + 127 -- unsigned
-					if flags.dither and (smpR % 2 ~= dither_state) then smpR = math.min(smpR + 1, 2^ 7-1) end
+					if flags.dither then smpR = dither(smpR, dither_state, 2^ 7) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<I1', smpR):getFFIPointer(), 1)
 					dst_ctr = dst_ctr + 1
 
 				elseif flags.bitdepth == 16 then
 
 					smpL = smpL * 2^15
-					if flags.dither and (smpL % 2 ~= dither_state) then smpL = math.min(smpL + 1, 2^15-1) end
+					if flags.dither then smpL = dither(smpL, dither_state, 2^15) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<i2', smpL):getFFIPointer(), 2)
 					dst_ctr = dst_ctr + 2
 
 					smpR = smpR * 2^15
-					if flags.dither and (smpR % 2 ~= dither_state) then smpR = math.min(smpR + 1, 2^15-1) end
+					if flags.dither then smpR = dither(smpR, dither_state, 2^15) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<i2', smpR):getFFIPointer(), 2)
 					dst_ctr = dst_ctr + 2
 
 				elseif flags.bitdepth == 24 then
 
 					smpL = smpL * 2^23
-					if flags.dither and (smpL % 2 ~= dither_state) then smpL = math.min(smpL + 1, 2^23-1) end
+					if flags.dither then smpL = dither(smpL, dither_state, 2^23) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<i3', smpL):getFFIPointer(), 3)
 					dst_ctr = dst_ctr + 3
 
 					smpR = smpR * 2^23
-					if flags.dither and (smpR % 2 ~= dither_state) then smpR = math.min(smpR + 1, 2^23-1) end
+					if flags.dither then smpR = dither(smpR, dither_state, 2^23) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<i3', smpR):getFFIPointer(), 3)
 					dst_ctr = dst_ctr + 3
 
 				elseif flags.bitdepth == 32 then
 
 					smpL = smpL * 2^31
-					if flags.dither and (smpL % 2 ~= dither_state) then smpL = math.min(smpL + 1, 2^31-1) end
+					if flags.dither then smpL = dither(smpL, dither_state, 2^31) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<i4', smpL):getFFIPointer(), 4)
 					dst_ctr = dst_ctr + 4
 
 					smpR = smpR * 2^31
-					if flags.dither and (smpR % 2 ~= dither_state) then smpR = math.min(smpR + 1, 2^31-1) end
+					if flags.dither then smpR = dither(smpR, dither_state, 2^31) end
 					ffi.copy(dst_ptr + dst_ctr, love.data.pack('data', '<i4', smpR):getFFIPointer(), 4)
 					dst_ctr = dst_ctr + 4
 
@@ -401,6 +429,12 @@ wex.export = function(flags, data, samplerate, bitdepth, channelcount)
 
 		end
 	end
+	
+	if padding then
+		-- Write an extra zero byte, per spec.
+		ffi.fill(dst_ptr + bytes, 1, 0x00)
+	end
+	
 	return BD
 end
 
